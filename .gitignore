@@ -1,0 +1,19 @@
+﻿# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+
+# venv
+.venv/
+
+# pytest
+.pytest_cache/
+
+# VSCode
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
