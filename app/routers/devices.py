@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from typing import List
 from ..models import Device
 from ..config import settings
+from ..services.logs import append_log
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -22,9 +23,9 @@ async def toggle_device(device_id: int):
     dev = _SIM_DB.get(device_id)
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
-    if settings.mode != "sim":
-        # 하드웨어 모드일 때는 실제 토글 로직/드라이버 호출로 대체
-        pass
+    prev = dev.is_on
+    # (하드웨어 모드면 나중에 실제 드라이버 호출 자리)
     dev.is_on = not dev.is_on
     _SIM_DB[device_id] = dev
+    append_log(device_id=device_id, action="toggle", note=f"{prev} -> {dev.is_on}")  # ★로그
     return dev
