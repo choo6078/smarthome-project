@@ -8,6 +8,7 @@ router = APIRouter(prefix="/api/logs", tags=["logs"])
 async def list_logs(
     limit: int = Query(50, ge=1, le=200),
     device_id: Optional[int] = None,
-    action: Optional[Literal["toggle", "create", "delete"]] = None,
+    action: Optional[Literal["toggle", "create", "update", "delete"]] = None,
 ):
     return query_logs(limit=limit, device_id=device_id, action=action)
+

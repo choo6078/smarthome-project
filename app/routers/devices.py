@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Body
 from typing import List
 from ..models import Device
 from ..config import settings
@@ -29,3 +29,32 @@ async def toggle_device(device_id: int):
     _SIM_DB[device_id] = dev
     append_log(device_id=device_id, action="toggle", note=f"{prev} -> {dev.is_on}")  # ★로그
     return dev
+
+@router.put("/{device_id}", response_model=Device)
+async def update_device(
+    device_id: int,
+    name: str = Body(None),
+    type: str = Body(None),
+    is_on: bool = Body(None),
+):
+    dev = _SIM_DB.get(device_id)
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    updates = {}
+    if name is not None:
+        updates["name"] = name
+    if type is not None:
+        updates["type"] = type
+    if is_on is not None:
+        updates["is_on"] = is_on
+
+    updated = dev.model_copy(update=updates)  # copy() -> model_copy()
+    _SIM_DB[device_id] = updated
+
+    append_log(
+        device_id=device_id,
+        action="update",
+        note=f"{dev.model_dump()} -> {updated.model_dump()}"  # dict() -> model_dump()
+    )
+    return updated

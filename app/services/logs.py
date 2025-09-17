@@ -3,7 +3,7 @@ from typing import List, Literal, Optional
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 
-Action = Literal["toggle", "create", "delete"]
+Action = Literal["toggle", "create", "update", "delete"]
 
 class LogEntry(BaseModel):
     id: int
