@@ -33,3 +33,15 @@
 - Action 리터럴에 `"update"` 누락 → Literal에 추가
 - Pydantic v2 경고: `copy()`, `dict()` 대신 `model_copy()`, `model_dump()` 사용
 - `/api/logs?action=update` 호출 시 422 오류 → Action 타입 일관성 유지로 해결
+
+## STEP 4 진행 완료 (2025-09-16)
+- 디바이스 CRUD 완성
+  - POST /api/devices: 새 디바이스 생성 (sim 모드 전용)
+  - DELETE /api/devices/{id}: 디바이스 삭제
+- 이벤트 로그 확장: action="create", "delete" 기록
+- 테스트: 생성/삭제 성공 및 로그 반영 검증 통과
+
+### 해결한 오류들
+- DeviceCreate 정의 누락 → app/models.py에 추가, routers/devices.py에서 import 보완
+- 서버 기동 시 NameError 발생 → DeviceCreate 임포트 누락 수정으로 해결
+- PowerShell REST 호출 시 JSON 전송 문제 → `-ContentType "application/json"` 지정으로 해결

@@ -6,3 +6,8 @@ class Device(BaseModel):
     name: str
     type: Literal["light", "plug", "sensor"]
     is_on: bool = False
+
+class DeviceCreate(BaseModel):
+    name: str
+    type: Literal["light", "plug", "sensor"]
+    is_on: bool = False
