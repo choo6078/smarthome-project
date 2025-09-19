@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, Body
-from typing import List
-from ..models import Device, DeviceCreate
+from fastapi import APIRouter, HTTPException, Body, Query
+from typing import List, Optional, Literal
+from ..models import Device, DeviceCreate, DeviceUpdate
 from ..config import settings
 from ..services.logs import append_log
 
@@ -17,9 +17,41 @@ def _next_id() -> int:
     return (max(_SIM_DB.keys()) + 1) if _SIM_DB else 1
 
 @router.get("", response_model=List[Device])
-async def list_devices():
-    # 하드웨어 모드 전환 시, 여기서 실제 하드웨어 어댑터로 교체 예정
-    return list(_SIM_DB.values())
+async def list_devices(
+    type: Optional[Literal["light", "plug", "sensor"]] = None,
+    is_on: Optional[bool] = None,
+    order: Literal["id", "-id", "name", "-name", "type", "-type"] = "id",
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=50),
+):
+    # 필터
+    items = list(_SIM_DB.values())
+    if type is not None:
+        items = [d for d in items if d.type == type]
+    if is_on is not None:
+        items = [d for d in items if d.is_on == is_on]
+
+    # 정렬
+    key = order.lstrip("-")
+    reverse = order.startswith("-")
+    if key == "id":
+        items.sort(key=lambda d: d.id, reverse=reverse)
+    elif key == "name":
+        items.sort(key=lambda d: d.name.lower(), reverse=reverse)
+    elif key == "type":
+        items.sort(key=lambda d: d.type, reverse=reverse)
+
+    # 페이지네이션
+    start = (page - 1) * page_size
+    end = start + page_size
+    return items[start:end]
+
+@router.get("/{device_id}", response_model=Device)
+async def get_device(device_id: int):
+    dev = _SIM_DB.get(device_id)
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+    return dev
 
 @router.post("", response_model=Device, status_code=201)
 async def create_device(payload: DeviceCreate):
@@ -42,32 +74,25 @@ async def toggle_device(device_id: int):
     append_log(device_id=device_id, action="toggle", note=f"{prev} -> {updated.is_on}")
     return updated
 
+
 @router.put("/{device_id}", response_model=Device)
-async def update_device(
-    device_id: int,
-    name: str = Body(None),
-    type: str = Body(None),
-    is_on: bool = Body(None),
-):
+async def update_device(device_id: int, payload: DeviceUpdate):  # ★ Body 모델로 받기
     dev = _SIM_DB.get(device_id)
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    updates = {}
-    if name is not None:
-        updates["name"] = name
-    if type is not None:
-        updates["type"] = type
-    if is_on is not None:
-        updates["is_on"] = is_on
+    updates = payload.model_dump(exclude_unset=True)  # ★ Body에서 온 필드만 반영
+    if not updates:
+        return dev  # 변경 없으면 그대로 반환(원하면 400으로 바꿔도 됨)
 
-    updated = dev.model_copy(update=updates)  # copy() -> model_copy()
+    updated = dev.model_copy(update=updates)
     _SIM_DB[device_id] = updated
 
+    from ..services.logs import append_log
     append_log(
         device_id=device_id,
         action="update",
-        note=f"{dev.model_dump()} -> {updated.model_dump()}"  # dict() -> model_dump()
+        note=f"{dev.model_dump()} -> {updated.model_dump()}",
     )
     return updated
 
@@ -76,9 +101,6 @@ async def delete_device(device_id: int):
     dev = _SIM_DB.get(device_id)
     if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
-    # 하드웨어 모드에서도 정책에 따라 금지하고 싶으면 아래 주석 해제
-    # if settings.mode != "sim":
-    #     raise HTTPException(status_code=403, detail="Deletion allowed only in simulator mode")
     _SIM_DB.pop(device_id)
     append_log(device_id=device_id, action="delete", note="deleted")
-    return  # 204 No Content
+    return
