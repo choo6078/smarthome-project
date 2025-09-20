@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException, Body, Query
-from typing import List, Optional, Literal
+from fastapi import APIRouter, HTTPException, Body, Query, Path
+from typing import List, Optional, Literal, Annotated
 from ..models import Device, DeviceCreate, DeviceUpdate
 from ..config import settings
 from ..services.logs import append_log
+from app.models import Device
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -47,9 +48,9 @@ async def list_devices(
     return items[start:end]
 
 @router.get("/{device_id}", response_model=Device)
-async def get_device(device_id: int):
-    dev = _SIM_DB.get(device_id)
-    if not dev:
+async def get_device(device_id: Annotated[int, Path(ge=1)]):
+    dev = _SIM_DB.get(device_id)  # _SIM_DB: dict[int, Device]
+    if dev is None:
         raise HTTPException(status_code=404, detail="Device not found")
     return dev
 
