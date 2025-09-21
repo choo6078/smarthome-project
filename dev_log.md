@@ -70,3 +70,29 @@
 - anyio trio 백엔드 미설치: `ModuleNotFoundError: trio` → `pip install trio`로 해결
 - 비동기 클라이언트 픽스처 부재: `async_client` 추가 (`tests/conftest.py`, httpx `ASGITransport`)
 - PowerShell에서 404 응답 확인 시 예외: `-SkipHttpErrorCheck` 또는 try/catch로 본문 확인 가이드 제공
+
+## STEP 7 진행 완료 (2025-09-21)
+- 목록 API 고도화
+  - `/api/devices` 응답을 **리스트** 형식으로 유지(기존 테스트 호환)
+  - 고급 목록(`/api/devices/advanced`): `meta + items` 제공(페이지 정보 포함)
+  - 정렬 필드 검증: 허용 외 필드 → **400 Invalid order field**
+  - 필터 패턴 확장: `type`에 **plug** 추가
+- 모델/시드
+  - `Device.type`에 `plug` 허용
+  - 시드 디바이스 3개 이상(plug 포함)
+- 로그 아키텍처
+  - 중앙 로그 서비스 도입: `app/services/logs.py`
+  - `append_log(device_id, action, note=None)`로 단일화
+  - `create/toggle/delete/update`에서 로그 기록 연동
+  - `/api/logs`가 서비스 기반으로 조회
+- 업데이트 API
+  - `PUT /api/devices/{id}`에서 변경 사항 적용 및 `update` 로그 + note 포함
+- 테스트
+  - 기존 테스트 전부 통과(15/15)
+  - 고급 목록 테스트는 `/api/devices/advanced`로 검증
+
+### 해결한 오류들
+- `type=plug` 미허용으로 인한 생성 실패 → 모델/쿼리 패턴 동기화
+- 응답 스키마 불일치로 인한 KeyError → `/api/devices` 리스트 형식 복원
+- 로그 스토어 분리로 증가 검증 실패 → 중앙 서비스로 통합
+- 로그 스키마에 `note` 누락 → `append_log(..., note=None)` 추가

@@ -1,36 +1,36 @@
 from __future__ import annotations
-from typing import List, Literal, Optional
+from typing import Literal, List, Dict, Any, Optional
 from datetime import datetime, timezone
-from pydantic import BaseModel, Field
 
-Action = Literal["toggle", "create", "update", "delete"]
+Action = Literal["create", "toggle", "delete", "update"]
 
-class LogEntry(BaseModel):
-    id: int
-    ts: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    device_id: int
-    action: Action
-    note: str | None = None
+def now_ts() -> float:
+    return datetime.now(timezone.utc).timestamp()
 
-_LOGS: list[LogEntry] = []
-_SEQ = 0
+# 전역 저장소: dict만 저장
+_LOGS: List[Dict[str, Any]] = []
 
-def _next_id() -> int:
-    global _SEQ
-    _SEQ += 1
-    return _SEQ
+def append_log(device_id: int, action: Action, note: Optional[str] = None) -> None:
+    # 필드셋: device_id, action, ts, note
+    _LOGS.append(
+        {
+            "device_id": device_id,
+            "action": action,
+            "ts": now_ts(),
+            "note": note,
+        }
+    )
 
-def append_log(*, device_id: int, action: Action, note: str | None = None) -> LogEntry:
-    entry = LogEntry(id=_next_id(), device_id=device_id, action=action, note=note)
-    _LOGS.append(entry)
-    return entry
-
-def query_logs(limit: int = 50, device_id: Optional[int] = None, action: Optional[Action] = None) -> List[LogEntry]:
-    items = _LOGS
-    if device_id is not None:
-        items = [x for x in items if x.device_id == device_id]
+def list_logs(
+    action: Optional[Action] = None,
+    device_id: Optional[int] = None,
+    limit: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    res = _LOGS
     if action is not None:
-        items = [x for x in items if x.action == action]
-    # 최신순
-    items = sorted(items, key=lambda x: x.ts, reverse=True)
-    return items[: max(1, min(limit, 200))]
+        res = [l for l in res if l.get("action") == action]
+    if device_id is not None:
+        res = [l for l in res if l.get("device_id") == device_id]
+    if limit is not None and limit >= 0:
+        res = res[-limit:]  # 최신 순(append 순서)에서 뒤에서부터 제한
+    return res

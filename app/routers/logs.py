@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Query
-from typing import Optional, Literal, List
-from ..services.logs import query_logs, LogEntry
+from typing import Annotated, Literal
+from app.services.logs import list_logs as _list_logs
 
-router = APIRouter(prefix="/api/logs", tags=["logs"])
+router = APIRouter(prefix="/api", tags=["logs"])
 
-@router.get("", response_model=List[LogEntry])
-async def list_logs(
-    limit: int = Query(50, ge=1, le=200),
-    device_id: Optional[int] = None,
-    action: Optional[Literal["toggle", "create", "update", "delete"]] = None,
+@router.get("/logs")
+async def get_logs(
+    action: Annotated[Literal["create", "toggle", "delete", "update"] | None, Query()] = None,
+    device_id: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int | None, Query(ge=0)] = None,
 ):
-    return query_logs(limit=limit, device_id=device_id, action=action)
+    return _list_logs(action=action, device_id=device_id, limit=limit)
 
