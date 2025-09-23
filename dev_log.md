@@ -96,3 +96,15 @@
 - 응답 스키마 불일치로 인한 KeyError → `/api/devices` 리스트 형식 복원
 - 로그 스토어 분리로 증가 검증 실패 → 중앙 서비스로 통합
 - 로그 스키마에 `note` 누락 → `append_log(..., note=None)` 추가
+
+## STEP 8 진행 완료 (2025-09-21)
+- 로그 필터링 API 고도화 (`GET /api/logs`)
+  - `since`, `until` 파라미터 적용 시 ±ε(1e-3초) 보정 → 경계값 로그 누락 방지
+  - `order=asc|desc` 옵션 정식 지원, 기본은 desc
+  - 응답 포맷 일관화: 단일 로그여도 항상 리스트로 반환
+  - 로그에 `note` 필드 기본 포함 (상세 변경 내역 기록 가능)
+
+### 해결한 오류들
+- `test_logs_since_until_and_order`: 경계 timestamp 누락 → ε 보정으로 해결
+- `test_update_device_fields_and_log`: `append_log`가 `note` 인자 미지원 → 시그니처 확장
+- `test_toggle_creates_log_and_list`: 로그 entry에 `note` 없음 → 기본 필드로 추가

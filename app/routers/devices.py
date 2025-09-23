@@ -3,7 +3,7 @@ from typing import List, Optional, Literal, Annotated
 from ..models import Device, DeviceCreate, DeviceUpdate
 from ..config import settings
 from ..services.logs import append_log
-from app.models import Device, DeviceCreate, now_ts
+from app.models import Device, DeviceCreate, DeviceUpdate, now_ts
 from pydantic import BaseModel
 from app.services.logs import append_log
 
@@ -15,8 +15,18 @@ def _append_log(device_id: int, action: str):
 _SIM_DB: dict[int, Device] = {
     1: Device(id=1, name="Living Light", type="light", is_on=False),
     2: Device(id=2, name="Desk Fan", type="fan", is_on=True),
-    3: Device(id=3, name="Kitchen Outlet", type="outlet", is_on=False),
+    3: Device(id=3, name="Kitchen Outlet", type="outlet", is_on=False),  # ★ 추가
 }
+
+def _name_exists(name: str, exclude_id: int | None = None) -> bool:
+    """대소문자 무시 중복 검사. 업데이트 시 자기 자신(exclude_id)은 제외."""
+    target = name.strip().lower()
+    for d in _SIM_DB.values():
+        if exclude_id is not None and d.id == exclude_id:
+            continue
+        if d.name.strip().lower() == target:
+            return True
+    return False
 
 def _next_id() -> int:
     return max(_SIM_DB.keys(), default=0) + 1
@@ -102,9 +112,14 @@ async def get_device(device_id: Annotated[int, Path(ge=1)]):
 
 @router.post("", response_model=Device, status_code=201)
 async def create_device(payload: DeviceCreate):
-    new = Device(id=_next_id(), name=payload.name, type=payload.type, is_on=payload.is_on)
+    # 1) 이름 중복(대소문자 무시) → 409
+    if _name_exists(payload.name):
+        raise HTTPException(status_code=409, detail=f"Device name already exists: {payload.name.strip()}")
+
+    # 2) 생성
+    new = Device(id=_next_id(), name=payload.name.strip(), type=payload.type, is_on=payload.is_on)
     _SIM_DB[new.id] = new
-    append_log(new.id, "create")
+    append_log(new.id, "create", note=f"name={new.name}, type={new.type}, is_on={new.is_on}")
     return new
 
 @router.post("/{device_id}/toggle", response_model=Device)
@@ -119,24 +134,26 @@ async def toggle_device(device_id: Annotated[int, Path(ge=1)]):
     return dev
 
 @router.put("/{device_id}", response_model=Device)
-async def update_device(device_id: int, payload: DeviceUpdate):  # ★ Body 모델로 받기
+async def update_device(device_id: Annotated[int, Path(ge=1)], payload: DeviceUpdate):
     dev = _SIM_DB.get(device_id)
-    if not dev:
+    if dev is None:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    updates = payload.model_dump(exclude_unset=True)  # ★ Body에서 온 필드만 반영
-    if not updates:
-        return dev  # 변경 없으면 그대로 반환(원하면 400으로 바꿔도 됨)
+    updates = payload.model_dump(exclude_unset=True)
+    # 1) 이름을 바꾸는 경우 → 중복 체크 (자기 자신 제외)
+    if "name" in updates and updates["name"] is not None:
+        new_name = updates["name"].strip()
+        if _name_exists(new_name, exclude_id=device_id):
+            raise HTTPException(status_code=409, detail=f"Device name already exists: {new_name}")
+        updates["name"] = new_name
 
+    # 2) 실제 적용
+    before = dev.model_dump()
     updated = dev.model_copy(update=updates)
+    updated.updated_at = now_ts()
     _SIM_DB[device_id] = updated
 
-    from ..services.logs import append_log
-    append_log(
-        device_id=device_id,
-        action="update",
-        note=f"{dev.model_dump()} -> {updated.model_dump()}",
-    )
+    append_log(device_id, "update", note=f"{before} -> {updated.model_dump()}")
     return updated
 
 @router.delete("/{device_id}", status_code=204)

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal, Optional
 from datetime import datetime, timezone
 
@@ -17,11 +17,30 @@ class Device(BaseModel):
 
 
 class DeviceCreate(BaseModel):
-    name: str
+    name: str = Field(..., min_length=3, max_length=50, description="3~50자")
     type: DeviceType
     is_on: bool = False
 
+    @field_validator("name")
+    @classmethod
+    def trim_and_check(cls, v: str) -> str:
+        v2 = v.strip()
+        if len(v2) < 3:
+            raise ValueError("name must be at least 3 characters (after trimming)")
+        return v2
+
 class DeviceUpdate(BaseModel):
-    name: Optional[str] = None
-    type: Optional[Literal["light", "plug", "sensor"]] = None
-    is_on: Optional[bool] = None
+    # 부분 업데이트 허용: unset인 필드는 무시
+    name: str | None = Field(None, min_length=3, max_length=50)
+    type: DeviceType | None = None
+    is_on: bool | None = None
+
+    @field_validator("name")
+    @classmethod
+    def trim_and_check(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v2 = v.strip()
+        if len(v2) < 3:
+            raise ValueError("name must be at least 3 characters (after trimming)")
+        return v2
