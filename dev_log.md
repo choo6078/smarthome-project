@@ -108,3 +108,20 @@
 - `test_logs_since_until_and_order`: 경계 timestamp 누락 → ε 보정으로 해결
 - `test_update_device_fields_and_log`: `append_log`가 `note` 인자 미지원 → 시그니처 확장
 - `test_toggle_creates_log_and_list`: 로그 entry에 `note` 없음 → 기본 필드로 추가
+
+## STEP 9 진행 완료 (2025-09-23)
+- 디바이스 검증 강화
+  - 이름 트리밍 후 길이 검증: 3~50자(공백 제거 후 판정)
+  - 허용 타입 검증 유지: light|fan|outlet|sensor|plug
+  - 이름 중복(대소문자 무시) 시 409 Conflict — 생성/수정 모두 적용
+- 테스트 픽스처 정비
+  - `tests/conftest.py`의 autouse 초기화에서 **시드 3개 보장**(Living Light, Desk Fan, Kitchen Outlet)
+  - 필요 시 `_SEQ`(auto id)도 3으로 동기화
+
+### 해결한 오류들
+- `test_create_name_trim_and_length[trio]`
+  - 원인: 이전 테스트에서 만든 이름과 겹쳐 409 발생
+  - 조치: 테스트 격리를 위해 픽스처에서 상태 초기화 및 시드 재주입
+- `test_filter_by_type_and_is_on_and_sort_paging`
+  - 원인: 픽스처가 2개만 시드하여 테스트의 “최소 3개” 전제 충돌
+  - 조치: 픽스처 시드를 3개로 상향 고정
