@@ -125,3 +125,14 @@
 - `test_filter_by_type_and_is_on_and_sort_paging`
   - 원인: 픽스처가 2개만 시드하여 테스트의 “최소 3개” 전제 충돌
   - 조치: 픽스처 시드를 3개로 상향 고정
+
+## STEP 10 진행 완료 (2025-09-24)
+- devices 서비스 계층 분리 (`app/services/devices.py`)
+  - CRUD/toggle 로직을 서비스로 이동
+  - 라우터는 HTTP 처리만 담당
+- append_log 호출, dict 직접 조작 등 중복 코드 제거
+- 시드/시퀀스 관리도 서비스에 통합
+- 기존 테스트 모두 재사용 가능 → pytest로 통합 확인
+
+### 해결한 오류들
+- 없음 (정상 동작)
