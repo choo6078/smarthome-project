@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Literal, List, Dict, Any, Optional
 from datetime import datetime, timezone
+from ..utils.time import now_ts
 
 # 액션 타입은 Literal로 제한 (오타/불일치 예방)
 Action = Literal["create", "toggle", "delete", "update"]
@@ -9,21 +10,18 @@ def now_ts() -> float:
     """UTC 기준 epoch 초. 프론트에서 범용적으로 쓰기 쉽고 비교도 간단."""
     return datetime.now(timezone.utc).timestamp()
 
-# 메모리 내 로그 저장소 (지금은 dict 리스트 -> 나중에 DB로 치환 가능)
-_LOGS: List[Dict[str, Any]] = []
+_LOGS: List[Dict] = []
 
-def append_log(device_id: int, action: Action, note: Optional[str] = None) -> None:
-    """로그 1건 추가. note는 선택 필드로 상세 변경점 등 기록."""
-    _LOGS.append(
-        {
-            "device_id": device_id,
-            "action": action,
-            "ts": now_ts(),  # float(epoch seconds)
-            "note": note,    # 항상 키를 유지(없으면 None) -> 스키마 안정성
-        }
-    )
+# Why: 생성/업데이트/토글 마다 중앙 로그 필요
+# What: 단순 append + 조회를 위한 최소 구조
+# How: 인메모리 리스트에 dict 추가. ts는 UTC epoch(float)
 
+def append_log(device_id: int, action: str, note: Optional[str] = None) -> None:
+    _LOGS.append({"device_id": device_id, "action": action, "ts": now_ts(), "note": note})
 
+def reset_logs() -> None:
+    _LOGS.clear()
+    
 def list_logs(
     action: Optional[Action] = None,
     device_id: Optional[int] = None,
@@ -32,7 +30,7 @@ def list_logs(
     since: Optional[float] = None,   # >= 이 시각부터
     until: Optional[float] = None,   # <= 이 시각까지
     order: Literal["asc", "desc"] = "desc",  # 시간 정렬 방식
-) -> List[Dict[str, Any]]:
+    ) -> List[Dict[str, Any]]:
     """
     - action/device_id로 1차 필터
     - since/until로 기간 필터 (epoch)

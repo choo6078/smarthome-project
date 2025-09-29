@@ -7,6 +7,7 @@
 from ..models import Device
 from ..services.logs import append_log
 from datetime import datetime, timezone
+from .adapters.base import DeviceAdapter
 
 _SIM_DB: dict[int, Device] = {}   # 실제 DB 대신 dict 시뮬
 _SEQ = 0
@@ -54,11 +55,9 @@ def delete_device(device_id: int) -> bool:
     append_log(device_id, "delete", note="device deleted")
     return True
 
-def toggle_device(device_id: int) -> Device | None:
-    dev = _SIM_DB.get(device_id)
-    if not dev:
-        return None
-    updated = dev.model_copy(update={"is_on": not dev.is_on, "updated_at": datetime.now(timezone.utc)})
-    _SIM_DB[device_id] = updated
-    append_log(device_id, "toggle", note=f"{dev.is_on} -> {updated.is_on}")
-    return updated
+# Why: 라우터에서 비즈니스 로직을 분리하고 테스트 용이성 확보.
+# What: 어댑터로 토글 수행 후 결과 반환(추후 로그/검증 추가 예정).
+# How: 주입된 DeviceAdapter 사용. I/O/부작용은 어댑터에 위임.
+
+def toggle_device(adapter: DeviceAdapter, device_id: int) -> bool:
+    return adapter.toggle(device_id)

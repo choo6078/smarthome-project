@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, Path
+from fastapi import APIRouter, HTTPException, Query, Depends, Path
 from typing import List, Optional, Literal, Annotated
 from ..models import Device, DeviceCreate, DeviceUpdate
 from ..config import settings
@@ -6,6 +6,10 @@ from ..services.logs import append_log
 from app.models import Device, DeviceCreate, DeviceUpdate, now_ts
 from pydantic import BaseModel
 from app.services.logs import append_log
+from app.deps import provide_device_adapter
+from app.services.devices import toggle_device
+from app.services.adapters.base import DeviceAdapter
+
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -122,16 +126,15 @@ async def create_device(payload: DeviceCreate):
     append_log(new.id, "create", note=f"name={new.name}, type={new.type}, is_on={new.is_on}")
     return new
 
+# Why: 라우터는 모드/저장소를 몰라도 되게 DI로 위임
+# What: 어댑터가 토글 후 Device를 반환 → 그대로 응답
+# How: provide_device_adapter가 SM_MODE에 맞는 구현체를 공급
 @router.post("/{device_id}/toggle", response_model=Device)
-async def toggle_device(device_id: Annotated[int, Path(ge=1)]):
-    dev = _SIM_DB.get(device_id)
-    if dev is None:
-        raise HTTPException(status_code=404, detail="Device not found")
-    dev.is_on = not dev.is_on
-    dev.updated_at = now_ts()
-    _SIM_DB[device_id] = dev
-    append_log(device_id, "toggle")
-    return dev
+async def toggle_device(
+    device_id: Annotated[int, Path(ge=1)],
+    adapter: DeviceAdapter = Depends(provide_device_adapter),
+):
+    return adapter.toggle(device_id)
 
 @router.put("/{device_id}", response_model=Device)
 async def update_device(device_id: Annotated[int, Path(ge=1)], payload: DeviceUpdate):

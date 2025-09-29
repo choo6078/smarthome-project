@@ -1,26 +1,27 @@
-from .base import DeviceAdapter
 from fastapi import HTTPException
 from app.models import Device
 from app.services.adapters.base import DeviceAdapter
 from app.services.logs import append_log
 from app.utils.time import now_ts
+from ...models import Device
+from .base import DeviceAdapter
 from ...services.logs import append_log
 from ...utils.time import now_ts
 from ...state import _SIM_DB, seed_devices
-from ...models import Device
 
-# Why: UI/응답 일관성을 위해 hw 모드도 Device를 반환(실제 GPIO는 차후)
-# What: 실제론 하드웨어 호출이겠지만 지금은 상태를 토글하고 로그 남김
-# How: 시뮬 DB에 반영 + print로 호출 확인
-class HardwareStubAdapter(DeviceAdapter):
+# Why: 기존 시뮬 토글 로직을 어댑터로 캡슐화해 DI로 주입하기 위함
+# What: device_id로 디바이스 조회→토글→updated_at/로그→저장→Device 반환
+# How: 인메모리 dict 사용, 못 찾으면 404 예외
+class SimAdapter(DeviceAdapter):
     def toggle(self, device_id: int) -> Device:
-        print(f"[HW-STUB] toggle called for device {device_id}", flush=True)  # ← flush 추가
         dev = _SIM_DB.get(device_id)
-        if dev is None and not _SIM_DB:
+        if dev is None and not _SIM_DB:   # DB가 비어 있으면 1회 시드 후 재시도
             seed_devices()
             dev = _SIM_DB.get(device_id)
+
         if dev is None:
             raise HTTPException(status_code=404, detail="Device not found")
+
         dev.is_on = not dev.is_on
         dev.updated_at = now_ts()
         _SIM_DB[device_id] = dev

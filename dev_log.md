@@ -136,3 +136,40 @@
 
 ### 해결한 오류들
 - 없음 (정상 동작)
+
+## STEP 11 진행 완료 (2025-09-25)
+- 주요 구현
+  - 어댑터 인터페이스(`DeviceAdapter`) 정의
+  - 하드웨어 모드 스텁(`HardwareStubAdapter`) 추가
+  - 시뮬레이터 ↔ 하드웨어 모드 구조 분리 기초 완성
+- 추가 개선
+  - SM_MODE=hw 선택 시 하드웨어 스텁 사용 가능하도록 준비
+
+### 해결한 오류들
+- 없음 (스텁 레벨이라 단순 출력 확인만)
+
+## STEP 12 진행 완료 (2025-09-30)
+- 주요 구현
+  - 시뮬레이터 모드 ↔ 하드웨어 모드 전환 구조(DI/Config 기반) 도입
+  - `DeviceAdapter` 인터페이스 정의 및 `SimAdapter` / `HardwareStubAdapter` 구현
+  - `app/deps.py`를 통해 라우터에서 모드별 어댑터 주입하도록 구성
+  - `/health` 응답에 현재 모드(`sim`/`hw`) 추가
+  - 앱 생성 시 및 어댑터 호출 시 시드 자동 주입 로직 보강 → 초기 404 방지
+  - 테스트 안정화:
+    - `test_hw_stub.py` → Device 반환 검증으로 변경
+    - `test_mode_switch_di.py` → 연속 토글 기반으로 반전 여부 검증
+  - `app/config.py`에서 `get_settings()` 기반 설정 관리, 하위호환용 `settings` 셔틀 추가
+
+- 추가 개선
+  - `print` 로그 캡처 의존 제거 → 토글 결과를 응답 JSON 기반으로 검증
+  - `pytest` 환경에서 SM_MODE 전환 시 `importlib.reload`로 반영되도록 개선
+  - `app/main.py` 시드 보증 및 로그 초기화 중복 방어
+
+### 해결한 오류들
+- `ImportError: cannot import name 'SimAdapter'` → 모듈 경로 및 `__init__.py` 수정
+- `ModuleNotFoundError: No module named 'app.utils'` → 유틸 모듈 생성 및 정리
+- `/health` KeyError('mode') → `/health` 응답에 `mode` 포함
+- 초기 상태 404 (toggle, logs) → 앱 부팅 시/어댑터 호출 시 시드 강제 주입
+- `AsyncClient(app=...)` 에러 → `ASGITransport` 사용으로 전환
+- `capsys` 캡처 실패 → `print` 의존 제거, 응답 JSON으로 테스트
+- `ImportError: cannot import name 'settings'` → `config.py`에 하위호환용 `settings` 추가
