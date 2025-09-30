@@ -8,6 +8,7 @@ from .routers.logs import router as logs_router
 from app.routers import devices
 from .state import seed_devices, _SIM_DB
 from .services.logs import reset_logs, _LOGS
+from .db import Base, engine
 
 def _ensure_seed_once() -> None:
     if not _SIM_DB:
@@ -42,3 +43,11 @@ def create_app() -> FastAPI:
     app.include_router(logs_router)
     return app
 app = create_app()
+
+@app.on_event("startup")
+def _init_state():
+    from .state import seed_devices
+    from .services.logs import reset_logs
+    Base.metadata.create_all(bind=engine)
+    seed_devices()
+    reset_logs()
