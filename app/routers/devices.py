@@ -1,20 +1,18 @@
 from fastapi import APIRouter, HTTPException, Query, Depends, Path
 from typing import List, Optional, Literal, Annotated
-from ..models import Device, DeviceCreate, DeviceUpdate
+from ..models import Device, DeviceCreate, DeviceUpdate, now_ts
 from ..config import settings
 from ..services.logs import append_log
-from app.models import Device, DeviceCreate, DeviceUpdate, now_ts
 from pydantic import BaseModel
-from app.services.logs import append_log
-from app.deps import provide_device_adapter
-from app.services.devices import toggle_device
-from app.services.adapters.base import DeviceAdapter
-from app.deps_db import get_db
+from ..deps import provide_device_adapter
+from ..services.devices import toggle_device
+from ..services.adapters.base import DeviceAdapter
+from ..deps_db import get_db
 from sqlalchemy.orm import Session
-from app.repo.devices_db import get_device_by_id as db_get_device, list_devices as db_list_devices, name_exists
-from ..state import _SIM_DB  # (인메모리 유지 시 필요)
+from ..repo.devices_db import get_device_by_id as db_get_device, list_devices as db_list_devices, name_exists
+from ..state import _SIM_DB, refresh_cache_from_db  # (인메모리 유지 시 필요)
 from ..models_orm import DeviceORM
-from app.utils.time import now_ts
+from ..utils.time import now_ts
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -122,18 +120,20 @@ async def get_device_detail(device_id: Annotated[int, Path(ge=1)], db: Session =
         raise HTTPException(status_code=404, detail="Device not found")
     return dev
 
+# 생성 (DB → 캐시)
 @router.post("", response_model=Device, status_code=201)
 async def create_device(payload: DeviceCreate, db: Session = Depends(get_db)):
     name = payload.name.strip()
     if name_exists(db, name):
-        # ✅ 문구 변경
         raise HTTPException(status_code=409, detail="name already exists")
-    new_id = (max(_SIM_DB.keys()) + 1) if _SIM_DB else 1
-    dev = Device(id=new_id, name=name, type=payload.type, is_on=False, updated_at=now_ts())
-    _SIM_DB[new_id] = dev
-    # ✅ 생성 시 로그
-    append_log(new_id, "create")
-    return dev
+    row = DeviceORM(name=name, type=payload.type, is_on=payload.is_on or False, updated_at=now_ts())
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    append_log(row.id, "create")
+    # 캐시 동기화(부분 업데이트도 가능하지만 안전하게 전체 리프레시)
+    refresh_cache_from_db()
+    return Device(id=row.id, name=row.name, type=row.type, is_on=row.is_on, updated_at=row.updated_at)
 
 # Why: 라우터는 모드/저장소를 몰라도 되게 DI로 위임
 # What: 어댑터가 토글 후 Device를 반환 → 그대로 응답
@@ -147,52 +147,47 @@ async def toggle_device(
 ):
     return adapter.toggle(device_id)
 
+# 수정 (DB → 캐시)
 @router.put("/{device_id}", response_model=Device)
 async def update_device(
     device_id: Annotated[int, Path(ge=1)],
     payload: DeviceUpdate,
     db: Session = Depends(get_db),
 ):
-    dev = _SIM_DB.get(device_id)
-    if not dev:
+    row = db.get(DeviceORM, device_id)
+    if row is None:
         raise HTTPException(status_code=404, detail="Device not found")
 
     if payload.name is not None:
         name = payload.name.strip()
         if name_exists(db, name, exclude_id=device_id):
-            # ✅ 문구 변경
             raise HTTPException(status_code=409, detail="name already exists")
-        dev.name = name
-
+        row.name = name
     if payload.type is not None:
-        dev.type = payload.type
+        row.type = payload.type
     if payload.is_on is not None:
-        dev.is_on = payload.is_on
+        row.is_on = payload.is_on
 
-    dev.updated_at = now_ts()
-    _SIM_DB[device_id] = dev
-    # ✅ 업데이트 로그
+    row.updated_at = now_ts()
+    db.add(row)
+    db.commit()
+    db.refresh(row)
     append_log(device_id, "update")
-    return dev
+    refresh_cache_from_db()
+    return Device(id=row.id, name=row.name, type=row.type, is_on=row.is_on, updated_at=row.updated_at)
 
+
+# 삭제 (DB → 캐시) — 204 그대로 유지
 @router.delete("/{device_id}", status_code=204)
 async def delete_device(
     device_id: Annotated[int, Path(ge=1)],
-    db: Session = Depends(get_db),  # ← DB 세션 주입
+    db: Session = Depends(get_db),
 ):
-    # 인메모리 삭제
-    dev = _SIM_DB.pop(device_id, None)
-    if not dev:
-        # 인메모리에 없더라도 DB에만 있을 수 있으므로 한 번 더 확인
-        row = db.get(DeviceORM, device_id)
-        if row is None:
-            raise HTTPException(status_code=404, detail="Device not found")
-        # 인메모리에 없고 DB에만 있으면 계속 진행 (아래에서 DB 삭제)
-    # DB 삭제 (있으면)
     row = db.get(DeviceORM, device_id)
-    if row is not None:
-        db.delete(row)
-        db.commit()
-
+    if row is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+    db.delete(row)
+    db.commit()
     append_log(device_id, "delete")
-    # 204 No Content → 본문 반환하지 않음
+    refresh_cache_from_db()
+    # 204는 본문 없음

@@ -4,7 +4,7 @@
 
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import asc, desc, func
+from sqlalchemy import asc, desc, func, select
 from ..models import Device
 from ..models_orm import DeviceORM
 
@@ -49,7 +49,8 @@ def list_devices(
 
 def name_exists(db: Session, name: str, exclude_id: int | None = None) -> bool:
     norm = (name or "").strip().lower()
-    q = db.query(DeviceORM.id).filter(func.lower(DeviceORM.name) == norm)
+    stmt = select(DeviceORM.id).where(func.lower(DeviceORM.name) == norm)
     if exclude_id is not None:
-        q = q.filter(DeviceORM.id != exclude_id)
-    return db.query(q.exists()).scalar()  # SA2에서도 동작
+        stmt = stmt.where(DeviceORM.id != exclude_id)
+    # 첫 행만 확인해서 존재 여부 판별 (2.x 권장)
+    return db.execute(stmt.limit(1)).first() is not None

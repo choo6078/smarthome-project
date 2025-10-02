@@ -195,3 +195,55 @@
 - `ModuleNotFoundError: No module named 'sqlalchemy'` → SQLAlchemy 설치
 - `no such table: devices` → ORM 임포트 시 자동 테이블 생성 로직 추가
 - `UNIQUE constraint failed: devices.name` → 테스트에서 UUID 접미사로 유니크 보장
+
+## STEP 14 진행 완료 (2025-10-02)
+- 주요 구현
+  - `/api/devices` 목록/상세 **READ 경로를 SQLAlchemy 기반**으로 전환
+  - **리포 계층** 추가: `app/repo/devices_db.py` (DB 조회/정렬/페이징 + 이름 중복 검사)
+  - **삭제(DELETE)** 시 **DB에서도 동기 삭제** 추가 → READ 경로(DB 일원화)와 일치
+  - **에러 문구 표준화**
+    - 잘못된 정렬 키: `400` + `"Invalid order field"`
+    - 이름 중복(대소문자 무시): `409` + `"name already exists"`
+  - **CRUD 로그 보강**: create/update/delete 시 `append_log()` 호출
+
+- 테스트
+  - `test_db_list_detail_wire.py` 추가: DB 기반 목록/상세 스모크
+  - `test_list_advanced.py`: 잘못된 `order` 케이스(400 + 문구) 통과
+  - `test_validation.py`: 이름 중복 409 + 문구 검증 통과
+  - `test_crud.py::test_delete_device_and_log`: 204 No Content + 삭제 로그 확인 통과
+
+### 해결한 오류들
+- `ModuleNotFoundError: No module named 'app.repo.devices_db'`  
+  → `app/repo/` 패키지 및 `devices_db.py` 생성, 상대 임포트로 안정화.
+- `assert 200 == 400` (잘못된 정렬 키에 200 반환)  
+  → 목록 API에서 미허용 정렬 키일 때 `400` + `"Invalid order field"`로 고정.
+- `assert 201 == 409` / `assert 200 == 409` (이름 중복 충돌 미처리)  
+  → `name_exists()` 도입, POST/PUT에서 대소문자 무시 중복 시 `409` + `"name already exists"`.
+- `assert 200 == 204` (DELETE 응답 코드 불일치)  
+  → DELETE를 `204 No Content`로 통일(본문 미반환).
+- 삭제 후에도 목록에 남음 (`assert all(d["id"] != did for d in items)`)  
+  → READ는 DB, DELETE는 인메모리만 삭제하던 불일치 수정 → **DB 동기 삭제** 추가.
+- CRUD 로그 누락으로 테스트 실패  
+  → create/update/delete 모두 `append_log()` 호출 추가.
+
+## STEP 15 (DB 연동 후 테스트 안정화)
+- **DB/캐시 초기화 픽스처 충돌 해결**
+  - 기존 `reset_state` (인메모리 초기화) + `_reset_db_and_state` (DB 초기화) 동시 autouse → 테스트 간 데이터 충돌 발생
+  - 인메모리 시드 제거, DB 기반 SSOT 원칙 확립
+- 최종 픽스처: `reset_db()` → `seed_devices()` → `refresh_cache_from_db()` → `reset_logs()`
+  - Why: 모든 테스트 시작 시 DB/캐시/로그 상태를 깨끗하게 보장
+  - What: DB drop/create 후 최소 3개 장치 시드, 캐시 동기화, 로그 초기화
+  - How: autouse fixture `_reset_db_and_state`에서 일괄 처리
+- **`@app.on_event("startup")` 정리**
+  - 테스트와 중복되던 reset/seed 로직 제거 → `Base.metadata.create_all()`만 유지
+- 테스트 결과: DB/캐시 불일치 오류, duplicate name 409 오류 등 해결됨
+
+### 해결한 오류
+- NameError: `SessionLocal` is not defined  
+   → DB 모듈 구조 정리 및 `SessionLocal` 올바른 import 경로 지정
+- Circular import (`engine` from partially initialized module)  
+   → `db.py` 정리하여 Base/engine/SessionLocal 분리
+- 테스트 간 상태 충돌 (duplicate name, 시드 불일치)  
+   → 인메모리 초기화 제거, DB 단일 진실원칙(SSOT) 적용
+- 409 Conflict (중복 이름) → 201 Created 기대 불일치 
+   → 픽스처 격리로 해결, 테스트 통과 안정화
