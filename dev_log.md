@@ -173,3 +173,25 @@
 - `AsyncClient(app=...)` 에러 → `ASGITransport` 사용으로 전환
 - `capsys` 캡처 실패 → `print` 의존 제거, 응답 JSON으로 테스트
 - `ImportError: cannot import name 'settings'` → `config.py`에 하위호환용 `settings` 추가
+
+## STEP 13 진행 완료 (2025-09-30)
+- 주요 구현
+  - DB 코어: `app/db.py` (Base/engine/SessionLocal) 추가
+  - ORM 모델: `DeviceORM`, `LogORM` 스켈레톤 정의
+  - `app/models_orm.py` 임포트 시 자동 테이블 생성 보장 (`Base.metadata.create_all`)
+  - 앱 기동 시에도 테이블 자동 생성 (중복 호출 무해)
+  - DB 세션 의존성 주입 준비(`get_db` in `app/deps_db.py`)
+
+- 테스트
+  - `test_db_skeleton.py`: 테이블 존재 확인 및 CRUD 스모크 테스트
+  - 중복 실행 시 UNIQUE 제약 충돌 → 테스트 이름에 UUID 접미사 추가로 해결
+  - 전체 테스트 asyncio/trio 환경 모두 통과 확인
+
+- 추가 개선
+  - requirements.txt에 `SQLAlchemy>=2.0,<3.0` 의존성 추가
+  - API는 여전히 인메모리 상태 유지, DB 전환은 STEP 14~15에서 순차 진행 예정
+
+### 해결한 오류들
+- `ModuleNotFoundError: No module named 'sqlalchemy'` → SQLAlchemy 설치
+- `no such table: devices` → ORM 임포트 시 자동 테이블 생성 로직 추가
+- `UNIQUE constraint failed: devices.name` → 테스트에서 UUID 접미사로 유니크 보장

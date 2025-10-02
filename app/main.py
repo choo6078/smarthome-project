@@ -22,8 +22,8 @@ app = FastAPI(title="SmartHome Web Dashboard", version="0.2.0")
 async def health():
     return {"status": "ok", "mode": settings.mode}
 
-app.include_router(devices.router)
-app.include_router(logs.router)
+app.include_router(devices_router)
+app.include_router(logs_router)
 app.include_router(logs_router)
 
 def create_app() -> FastAPI:

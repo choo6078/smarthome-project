@@ -9,7 +9,12 @@ from app.services.logs import append_log
 from app.deps import provide_device_adapter
 from app.services.devices import toggle_device
 from app.services.adapters.base import DeviceAdapter
-
+from app.deps_db import get_db
+from sqlalchemy.orm import Session
+from app.repo.devices_db import get_device_by_id as db_get_device, list_devices as db_list_devices, name_exists
+from ..state import _SIM_DB  # (인메모리 유지 시 필요)
+from ..models_orm import DeviceORM
+from app.utils.time import now_ts
 
 router = APIRouter(prefix="/api/devices", tags=["devices"])
 
@@ -61,20 +66,22 @@ def _paginate(items: list[Device], page: int, page_size: int) -> list[Device]:
     end = start + page_size
     return items[start:end]
 
-@router.get("", response_model=list[Device])
+# 목록 (DB) — 기존 파라미터 규약 유지(type, is_on, order, page, page_size)
+@router.get("", response_model=List[Device])
 async def list_devices(
-    type_: Annotated[str | None, Query(alias="type", pattern="^(light|fan|outlet|sensor|plug)$")] = None,
-    is_on: Annotated[bool | None, Query()] = None,
-    order: Annotated[str | None, Query(description="콤마 구분. 예) name,-updated_at")] = None,
-    page: Annotated[int, Query(ge=1)] = 1,
-    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+    db: Session = Depends(get_db),
+    type: Optional[str] = Query(None, description="light|fan|outlet|sensor|plug"),
+    is_on: Optional[bool] = Query(None),
+    order: str = Query("id"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
 ):
-    items = list(_SIM_DB.values())
-    items = _apply_filters(items, type_, is_on)
-    orders = [s.strip() for s in order.split(",")] if order else ["id"]
-    items = _apply_order(items, orders)
-    items = _paginate(items, page, page_size)
-    return items
+    key = order.lstrip("-")
+    allowed = {"id", "name", "updated_at"}
+    if key not in allowed:
+        # ✅ 테스트가 기대하는 문구로 고정
+        raise HTTPException(status_code=400, detail="Invalid order field")
+    return db_list_devices(db, device_type=type, is_on=is_on, order=order, page=page, page_size=page_size)
 
 class DeviceListResponse(BaseModel):
     meta: dict
@@ -107,28 +114,32 @@ async def list_devices_advanced(
     }
     return {"meta": meta, "items": sliced}
 
+# 상세 (DB)
 @router.get("/{device_id}", response_model=Device)
-async def get_device(device_id: Annotated[int, Path(ge=1)]):
-    dev = _SIM_DB.get(device_id)
-    if dev is None:
+async def get_device_detail(device_id: Annotated[int, Path(ge=1)], db: Session = Depends(get_db)):
+    dev = db_get_device(db, device_id)
+    if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
     return dev
 
 @router.post("", response_model=Device, status_code=201)
-async def create_device(payload: DeviceCreate):
-    # 1) 이름 중복(대소문자 무시) → 409
-    if _name_exists(payload.name):
-        raise HTTPException(status_code=409, detail=f"Device name already exists: {payload.name.strip()}")
-
-    # 2) 생성
-    new = Device(id=_next_id(), name=payload.name.strip(), type=payload.type, is_on=payload.is_on)
-    _SIM_DB[new.id] = new
-    append_log(new.id, "create", note=f"name={new.name}, type={new.type}, is_on={new.is_on}")
-    return new
+async def create_device(payload: DeviceCreate, db: Session = Depends(get_db)):
+    name = payload.name.strip()
+    if name_exists(db, name):
+        # ✅ 문구 변경
+        raise HTTPException(status_code=409, detail="name already exists")
+    new_id = (max(_SIM_DB.keys()) + 1) if _SIM_DB else 1
+    dev = Device(id=new_id, name=name, type=payload.type, is_on=False, updated_at=now_ts())
+    _SIM_DB[new_id] = dev
+    # ✅ 생성 시 로그
+    append_log(new_id, "create")
+    return dev
 
 # Why: 라우터는 모드/저장소를 몰라도 되게 DI로 위임
 # What: 어댑터가 토글 후 Device를 반환 → 그대로 응답
 # How: provide_device_adapter가 SM_MODE에 맞는 구현체를 공급
+
+# 토글 (인메모리/어댑터 유지)
 @router.post("/{device_id}/toggle", response_model=Device)
 async def toggle_device(
     device_id: Annotated[int, Path(ge=1)],
@@ -137,32 +148,51 @@ async def toggle_device(
     return adapter.toggle(device_id)
 
 @router.put("/{device_id}", response_model=Device)
-async def update_device(device_id: Annotated[int, Path(ge=1)], payload: DeviceUpdate):
+async def update_device(
+    device_id: Annotated[int, Path(ge=1)],
+    payload: DeviceUpdate,
+    db: Session = Depends(get_db),
+):
     dev = _SIM_DB.get(device_id)
-    if dev is None:
+    if not dev:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    updates = payload.model_dump(exclude_unset=True)
-    # 1) 이름을 바꾸는 경우 → 중복 체크 (자기 자신 제외)
-    if "name" in updates and updates["name"] is not None:
-        new_name = updates["name"].strip()
-        if _name_exists(new_name, exclude_id=device_id):
-            raise HTTPException(status_code=409, detail=f"Device name already exists: {new_name}")
-        updates["name"] = new_name
+    if payload.name is not None:
+        name = payload.name.strip()
+        if name_exists(db, name, exclude_id=device_id):
+            # ✅ 문구 변경
+            raise HTTPException(status_code=409, detail="name already exists")
+        dev.name = name
 
-    # 2) 실제 적용
-    before = dev.model_dump()
-    updated = dev.model_copy(update=updates)
-    updated.updated_at = now_ts()
-    _SIM_DB[device_id] = updated
+    if payload.type is not None:
+        dev.type = payload.type
+    if payload.is_on is not None:
+        dev.is_on = payload.is_on
 
-    append_log(device_id, "update", note=f"{before} -> {updated.model_dump()}")
-    return updated
+    dev.updated_at = now_ts()
+    _SIM_DB[device_id] = dev
+    # ✅ 업데이트 로그
+    append_log(device_id, "update")
+    return dev
 
 @router.delete("/{device_id}", status_code=204)
-async def delete_device(device_id: Annotated[int, Path(ge=1)]):
-    if device_id not in _SIM_DB:
-        raise HTTPException(status_code=404, detail="Device not found")
-    _SIM_DB.pop(device_id)
+async def delete_device(
+    device_id: Annotated[int, Path(ge=1)],
+    db: Session = Depends(get_db),  # ← DB 세션 주입
+):
+    # 인메모리 삭제
+    dev = _SIM_DB.pop(device_id, None)
+    if not dev:
+        # 인메모리에 없더라도 DB에만 있을 수 있으므로 한 번 더 확인
+        row = db.get(DeviceORM, device_id)
+        if row is None:
+            raise HTTPException(status_code=404, detail="Device not found")
+        # 인메모리에 없고 DB에만 있으면 계속 진행 (아래에서 DB 삭제)
+    # DB 삭제 (있으면)
+    row = db.get(DeviceORM, device_id)
+    if row is not None:
+        db.delete(row)
+        db.commit()
+
     append_log(device_id, "delete")
-    return
+    # 204 No Content → 본문 반환하지 않음
